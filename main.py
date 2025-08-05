@@ -1,40 +1,30 @@
 import os
 from flask import Flask, request
+from openai import OpenAI
 from twilio.twiml.messaging_response import MessagingResponse
-import openai
-from dotenv import load_dotenv
-
-load_dotenv()
 
 app = Flask(__name__)
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
-@app.route("/", methods=["POST"])
-def whatsapp_reply():
+@app.route("/webhook", methods=["POST"])
+def webhook():
     incoming_msg = request.values.get("Body", "").strip()
-    sender = request.values.get("From", "")
+    print(f"Mensaje recibido: {incoming_msg}")
 
-    if not incoming_msg:
-        return str(MessagingResponse())
+    reply = MessagingResponse()
+    msg = reply.message()
 
     try:
-        completion = openai.ChatCompletion.create(
+        completion = client.chat.completions.create(
             model="gpt-4",
-            messages=[
-                {"role": "system", "content": "Responde como asistente educativo para estudiantes universitarios."},
-                {"role": "user", "content": incoming_msg}
-            ]
+            messages=[{"role": "user", "content": incoming_msg}]
         )
-        answer = completion.choices[0].message.content.strip()
+        response_text = completion.choices[0].message.content.strip()
+        msg.body(response_text)
     except Exception as e:
-        answer = f"Hubo un error al consultar GPT-4: {e}"
+        msg.body(f"Hubo un error al consultar GPT-4: {str(e)}")
 
-    resp = MessagingResponse()
-    msg = resp.message()
-    msg.body(answer)
-    return str(resp)
+    return str(reply)
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
-
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=5000)
