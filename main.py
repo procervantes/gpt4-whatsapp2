@@ -1,3 +1,8 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv()  # Esto lee tu archivo .env y carga las variables
+
 from flask import Flask
 
 app = Flask(__name__)
