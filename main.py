@@ -1,42 +1,33 @@
 import os
-from dotenv import load_dotenv
 from flask import Flask, request
-from twilio.rest import Client
+from twilio.twiml.messaging_response import MessagingResponse
+from dotenv import load_dotenv
 
-# Cargar variables de entorno
+# Cargar variables del archivo .env
 load_dotenv()
 
-# Leer variables desde .env
-TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
-TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
-
-# Inicializar cliente de Twilio
-client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-
-# Crear app Flask
 app = Flask(__name__)
 
-@app.route("/", methods=["GET"])
-def index():
-    return "Servidor funcionando correctamente."
+@app.route('/', methods=['GET'])
+def check():
+    return 'Servidor activo ✅'
 
-@app.route("/send", methods=["POST"])
-def send_message():
-    data = request.get_json()
-    to_number = data.get("to")
-    message_body = data.get("message")
+@app.route('/', methods=['POST'])
+def reply_whatsapp():
+    # Leer el mensaje entrante
+    incoming_msg = request.values.get('Body', '').lower()
 
-    if not to_number or not message_body:
-        return {"error": "Faltan parámetros 'to' o 'message'"}, 400
+    # Crear la respuesta
+    resp = MessagingResponse()
+    msg = resp.message()
 
-    message = client.messages.create(
-        from_=TWILIO_PHONE_NUMBER,
-        to=to_number,
-        body=message_body
-    )
+    # Lógica de respuesta
+    if 'hola' in incoming_msg:
+        msg.body('¡Hola! Soy Lucy 🤖 ¿En qué te puedo ayudar hoy?')
+    else:
+        msg.body(f'No entendí tu mensaje: "{incoming_msg}". Intenta decir "hola".')
 
-    return {"status": "enviado", "sid": message.sid}
+    return str(resp)
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+if __name__ == '__main__':
+    app.run()
