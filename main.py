@@ -9,7 +9,7 @@ import gspread
 # Crear archivo temporal con las credenciales de Google
 credentials_path = "credentials.json"
 with open(credentials_path, "w") as f:
-    f.write(os.environ["GOOGLE_CREDS_JSON"])
+   
 
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
 
