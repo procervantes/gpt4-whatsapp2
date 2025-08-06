@@ -1,34 +1,52 @@
+
+import os
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
-import openai
-import os
+from openai import OpenAI
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
+# Inicializa Flask
 app = Flask(__name__)
 
-# Configura la API Key
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# Inicializa OpenAI
+client = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
 
+# Autenticación con Google Sheets
+scope = ['https://spreadsheets.google.com/feeds','https://www.googleapis.com/auth/drive']
+creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
+client_sheet = gspread.authorize(creds)
+sheet = client_sheet.open("Usuarios autorizados").sheet1
+
+# Ruta principal
 @app.route("/", methods=["POST"])
 def whatsapp_reply():
     incoming_msg = request.values.get('Body', '').strip()
-    resp = MessagingResponse()
-    msg = resp.message()
+    from_number = request.values.get('From', '').replace("whatsapp:", "")
 
+    # Verifica si el número está autorizado
+    numbers = sheet.col_values(1)
+    if from_number not in numbers:
+        return str(MessagingResponse().message("No estás autorizado para usar este servicio."))
+
+    # Consulta a GPT-4
     try:
-        # Llamada a GPT-4
-        response = openai.chat.completions.create(
+        response = client.chat.completions.create(
             model="gpt-4",
-            messages=[{"role": "user", "content": incoming_msg}],
-            temperature=0.7
+            messages=[
+                {"role": "system", "content": "Eres un asistente útil."},
+                {"role": "user", "content": incoming_msg}
+            ]
         )
-        gpt_reply = response.choices[0].message.content.strip()
-        msg.body(gpt_reply)
+        reply = response.choices[0].message.content.strip()
     except Exception as e:
-        msg.body(f"Hubo un error al consultar GPT-4:\n\n{str(e)}")
+        reply = f"Hubo un error al consultar GPT-4: {e}"
 
-    return str(resp)
+    twilio_resp = MessagingResponse()
+    twilio_resp.message(reply)
+    return str(twilio_resp)
 
+# Ejecutar
 if __name__ == "__main__":
-    import os
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(debug=True, host="0.0.0.0")
+    
