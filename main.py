@@ -1,52 +1,51 @@
 
 import os
+import json
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 from openai import OpenAI
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 
-# Inicializa Flask
+# Crear archivo temporal con las credenciales de Google
+credentials_path = "credentials.json"
+with open(credentials_path, "w") as f:
+    f.write(os.environ["GOOGLE_CREDS_JSON"])
+
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+
+# Inicializar gspread
+gc = gspread.service_account(filename=credentials_path)
+sheet = gc.open("Usuarios autorizados").worksheet("Hoja 1")
+
+# Leer números autorizados
+autorizados = sheet.col_values(1)
+
+# Inicializar OpenAI
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+# Inicializar Flask
 app = Flask(__name__)
 
-# Inicializa OpenAI
-client = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
-
-# Autenticación con Google Sheets
-scope = ['https://spreadsheets.google.com/feeds','https://www.googleapis.com/auth/drive']
-creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
-client_sheet = gspread.authorize(creds)
-sheet = client_sheet.open("Usuarios autorizados").sheet1
-
-# Ruta principal
 @app.route("/", methods=["POST"])
 def whatsapp_reply():
-    incoming_msg = request.values.get('Body', '').strip()
-    from_number = request.values.get('From', '').replace("whatsapp:", "")
+    numero = request.form.get("From", "")
+    mensaje = request.form.get("Body", "").strip()
 
-    # Verifica si el número está autorizado
-    numbers = sheet.col_values(1)
-    if from_number not in numbers:
-        return str(MessagingResponse().message("No estás autorizado para usar este servicio."))
+    respuesta = MessagingResponse()
 
-    # Consulta a GPT-4
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "Eres un asistente útil."},
-                {"role": "user", "content": incoming_msg}
-            ]
-        )
-        reply = response.choices[0].message.content.strip()
-    except Exception as e:
-        reply = f"Hubo un error al consultar GPT-4: {e}"
+    if numero not in autorizados:
+        respuesta.message("❌ Este número no está autorizado para usar este servicio.")
+    else:
+        try:
+            completion = client.chat.completions.create(
+                model="gpt-4",
+                messages=[{"role": "user", "content": mensaje}]
+            )
+            respuesta.message(completion.choices[0].message.content)
+        except Exception as e:
+            respuesta.message(f"⚠️ Error al consultar GPT-4: {e}")
 
-    twilio_resp = MessagingResponse()
-    twilio_resp.message(reply)
-    return str(twilio_resp)
+    return str(respuesta)
 
-# Ejecutar
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0")
-    
+    app.run(host="0.0.0.0", port=5000)
