@@ -1,57 +1,57 @@
+
 import os
+import openai
 import json
 from flask import Flask, request
-from twilio.twiml.messaging_response import MessagingResponse
-from openai import OpenAI
-from google.oauth2 import service_account
 import gspread
+from google.oauth2.service_account import Credentials
 
-# Escribir credenciales en un archivo temporal
+app = Flask(__name__)
+
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
+# Guardar archivo credentials.json
 credentials_path = "credentials.json"
 with open(credentials_path, "w") as f:
     f.write(os.environ["GOOGLE_CREDS_JSON"])
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
 
 # Autenticación con Google Sheets
-creds = service_account.Credentials.from_service_account_file(credentials_path)
+scope = ["https://www.googleapis.com/auth/spreadsheets"]
+creds = Credentials.from_service_account_file(credentials_path, scopes=scope)
 client = gspread.authorize(creds)
-sheet = client.open("Usuarios autorizados").worksheet("Hoja 1")
 
-# Verificar si el número está autorizado
-def numero_autorizado(numero):
-    numeros = sheet.col_values(1)
-    return numero in numeros
-
-# Inicializar Flask y OpenAI
-app = Flask(__name__)
-openai_client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+# Abrir la hoja de cálculo
+spreadsheet = client.open("Usuarios autorizados")
+sheet = spreadsheet.worksheet("Hoja 1")
 
 @app.route("/", methods=["POST"])
-def whatsapp_webhook():
+def webhook():
     incoming_msg = request.values.get("Body", "").strip()
-    from_number = request.values.get("From", "").replace("whatsapp:", "")
+    sender = request.values.get("From", "")
 
-    resp = MessagingResponse()
-    msg = resp.message()
+    # Validar número
+    autorizado = False
+    for row in sheet.get_all_values():
+        if row[1] in sender:
+            autorizado = True
+            break
 
-    if not numero_autorizado(from_number):
-        msg.body("Lo siento, tu número no está autorizado para usar este servicio.")
-        return str(resp)
+    if not autorizado:
+        return "Tu número no está autorizado para usar este servicio."
 
-    if incoming_msg:
-        try:
-            completion = openai_client.chat.completions.create(
-                model="gpt-4",
-                messages=[{"role": "user", "content": incoming_msg}]
-            )
-            respuesta = completion.choices[0].message.content
-            msg.body(respuesta)
-        except Exception as e:
-            msg.body(f"Error al consultar GPT-4: {str(e)}")
-    else:
-        msg.body("Hola, soy tu asistente GPT-4 en WhatsApp 😊")
+    # Consultar GPT
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": incoming_msg}],
+            temperature=0.7
+        )
+        reply = response.choices[0].message.content.strip()
+    except Exception as e:
+        reply = f"Hubo un error al consultar GPT-4: {e}"
 
-    return str(resp)
+    return reply
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=10000)
+    app.run(host="0.0.0.0", port=10000)
