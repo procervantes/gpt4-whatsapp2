@@ -1,57 +1,53 @@
 
 import os
-import openai
 import json
 from flask import Flask, request
+from twilio.twiml.messaging_response import MessagingResponse
+import openai
 import gspread
 from google.oauth2.service_account import Credentials
 
 app = Flask(__name__)
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# Configurar OpenAI
+openai.api_key = os.environ["OPENAI_API_KEY"]
 
-# Guardar archivo credentials.json
-credentials_path = "credentials.json"
-with open(credentials_path, "w") as f:
-    f.write(os.environ["GOOGLE_CREDS_JSON"])
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+# Autenticación con Google Sheets usando GOOGLE_CREDS_JSON
+creds_json = json.loads(os.environ["GOOGLE_CREDS_JSON"])
+scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+credentials = Credentials.from_service_account_info(creds_json, scopes=scopes)
+gc = gspread.authorize(credentials)
 
-# Autenticación con Google Sheets
-scope = ["https://www.googleapis.com/auth/spreadsheets"]
-creds = Credentials.from_service_account_file(credentials_path, scopes=scope)
-client = gspread.authorize(creds)
+# Abrir hoja de cálculo y worksheet
+spreadsheet = gc.open("Usuarios autorizados")
+worksheet = spreadsheet.sheet1
 
-# Abrir la hoja de cálculo
-spreadsheet = client.open("Usuarios autorizados")
-sheet = spreadsheet.worksheet("Hoja 1")
+# Leer todos los números autorizados
+numeros_autorizados = worksheet.col_values(1)  # asumiendo que la columna A tiene los teléfonos
 
 @app.route("/", methods=["POST"])
-def webhook():
+def whatsapp_reply():
     incoming_msg = request.values.get("Body", "").strip()
-    sender = request.values.get("From", "")
+    sender_number = request.values.get("From", "").replace("whatsapp:", "")
 
-    # Validar número
-    autorizado = False
-    for row in sheet.get_all_values():
-        if row[1] in sender:
-            autorizado = True
-            break
+    resp = MessagingResponse()
 
-    if not autorizado:
-        return "Tu número no está autorizado para usar este servicio."
+    if sender_number not in numeros_autorizados:
+        resp.message("⚠️ Acceso no autorizado.")
+        return str(resp)
 
-    # Consultar GPT
+    # Si está autorizado, responde con GPT-4
     try:
-        response = openai.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model="gpt-4",
-            messages=[{"role": "user", "content": incoming_msg}],
-            temperature=0.7
+            messages=[{"role": "user", "content": incoming_msg}]
         )
         reply = response.choices[0].message.content.strip()
     except Exception as e:
         reply = f"Hubo un error al consultar GPT-4: {e}"
 
-    return reply
+    resp.message(reply)
+    return str(resp)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(debug=True, host="0.0.0.0", port=5000)
