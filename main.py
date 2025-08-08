@@ -1,55 +1,61 @@
 import os
 import json
+from flask import Flask, request
+from twilio.twiml.messaging_response import MessagingResponse
 import openai
 import gspread
-from flask import Flask, request
 from google.oauth2.service_account import Credentials
 
 # Inicializar Flask
 app = Flask(__name__)
 
-# Configurar OpenAI
-openai.api_key = os.environ.get("OPENAI_API_KEY")
+# Configuración de OpenAI API Key
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Configurar Google Sheets
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets.readonly"
-]
-GOOGLE_CREDS_JSON = os.environ.get("GOOGLE_CREDS_JSON")
-SPREADSHEET_ID = os.environ.get("SHEET_ID")
+# Cargar credenciales de Google desde la variable de entorno
+google_creds_json = os.getenv("GOOGLE_CREDS_JSON")
+if not google_creds_json:
+    raise RuntimeError("Falta la variable de entorno GOOGLE_CREDS_JSON")
 
-if not GOOGLE_CREDS_JSON or not SPREADSHEET_ID:
-    raise RuntimeError("Faltan variables de entorno necesarias.")
+creds_info = json.loads(google_creds_json)
+credentials = Credentials.from_service_account_info(creds_info)
 
-creds_info = json.loads(GOOGLE_CREDS_JSON)
-credentials = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+# Autenticación con Google Sheets (usando gspread)
 gc = gspread.authorize(credentials)
-worksheet = gc.open_by_key(SPREADSHEET_ID).sheet1
 
-# Endpoint raíz
-@app.route("/", methods=["GET"])
-def home():
-    return "Servidor activo ✅"
+# Usar el ID de la hoja desde las variables de entorno
+spreadsheet_id = os.getenv("SHEET_ID")
+if not spreadsheet_id:
+    raise RuntimeError("Falta la variable de entorno SHEET_ID")
 
-# Endpoint de prueba
-@app.route("/whatsapp", methods=["POST"])
-def whatsapp_webhook():
+worksheet = gc.open_by_key(spreadsheet_id).sheet1
+
+# Leer números autorizados desde la hoja de cálculo
+authorized_numbers = worksheet.col_values(1)  # Columna A
+
+@app.route("/", methods=["POST"])
+def webhook():
     incoming_msg = request.values.get("Body", "").strip()
-    sender = request.values.get("From", "")
+    sender_number = request.values.get("From", "").replace("whatsapp:", "")
 
-    # Leer usuarios autorizados desde Google Sheets
-    usuarios = worksheet.col_values(1)  # Columna A: Números autorizados
+    resp = MessagingResponse()
 
-    if sender not in usuarios:
-        return "Número no autorizado."
+    if sender_number not in authorized_numbers:
+        resp.message("❌ Tu número no está autorizado para usar este servicio.")
+        return str(resp)
 
-    # Llamada a OpenAI
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": incoming_msg}]
-    )
-    reply = response["choices"][0]["message"]["content"]
-    return reply
+    # Llamada a la API de GPT-4
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": incoming_msg}]
+        )
+        reply = response.choices[0].message.content.strip()
+    except Exception as e:
+        reply = f"Ocurrió un error consultando GPT-4: {e}"
+
+    resp.message(reply)
+    return str(resp)
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, host="0.0.0.0", port=5000)
