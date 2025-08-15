@@ -1,14 +1,18 @@
-# GPT-4 WhatsApp con control por Google Sheets
+# GPT-4 WhatsApp App - Render Free
 
-Este proyecto permite conectar WhatsApp con GPT-4 y controlar el acceso mediante un documento de Google Sheets.
+Esta app permite que alumnos de la universidad accedan a GPT-4 por WhatsApp usando Twilio.
 
-### Variables de entorno necesarias en Render
+## Configuración
 
-- `OPENAI_API_KEY` – Tu clave de OpenAI.
-- `GOOGLE_CREDS_JSON` – El contenido del JSON de credenciales (una sola línea).
-- `SHEET_ID` – ID del Google Sheet.
+1. Variables de entorno en Render:
+   - OPENAI_API_KEY
+   - TWILIO_ACCOUNT_SID
+   - TWILIO_AUTH_TOKEN
+   - TWILIO_PHONE_NUMBER
+   - RECEIVER_PHONE_NUMBER
+   - SHEET_ID
+   - GOOGLE_CREDS_JSON (JSON de la cuenta de servicio de Google, **en una sola línea**)
 
-### Requisitos
-
-- La hoja debe compartirse con el service account como editor.
-- El ID de la hoja se obtiene de la URL: `https://docs.google.com/spreadsheets/d/{ID}/edit#gid=0`.
+2. Requirements:
+   ```bash
+   pip install -r requirements.txt
