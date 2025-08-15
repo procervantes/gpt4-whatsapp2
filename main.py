@@ -1,64 +1,54 @@
 import os
 import json
-from google.oauth2.service_account import Credentials
 import gspread
-from openai import OpenAI
-from twilio.rest import Client
+from google.oauth2.service_account import Credentials
 from flask import Flask, request, jsonify
 
-# Leer Google creds desde ENV
+# --- CONFIGURACIÓN ---
 google_creds_json = os.environ.get("GOOGLE_CREDS_JSON")
 if not google_creds_json:
-    raise Exception("La variable de entorno GOOGLE_CREDS_JSON no está configurada")
-creds_info = json.loads(google_creds_json)
-credentials = Credentials.from_service_account_info(creds_info)
+    raise ValueError("No se encontró la variable de entorno 'GOOGLE_CREDS_JSON'.")
 
-# Conectar a Google Sheets
+creds_info = json.loads(google_creds_json)
+
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
+credentials = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+
+gc = gspread.authorize(credentials)
+
 SHEET_ID = os.environ.get("SHEET_ID")
 if not SHEET_ID:
-    raise Exception("La variable de entorno SHEET_ID no está configurada")
-gc = gspread.authorize(credentials)
+    raise ValueError("No se encontró la variable de entorno 'SHEET_ID'.")
+
 sheet = gc.open_by_key(SHEET_ID).sheet1
 
-# Configurar OpenAI
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    raise Exception("OPENAI_API_KEY no configurada")
-client_ai = OpenAI(api_key=OPENAI_API_KEY)
-
-# Configurar Twilio
-TWILIO_SID = os.environ.get("TWILIO_SID")
-TWILIO_AUTH = os.environ.get("TWILIO_AUTH")
-TWILIO_PHONE = os.environ.get("TWILIO_PHONE")
-if not all([TWILIO_SID, TWILIO_AUTH, TWILIO_PHONE]):
-    raise Exception("Credenciales de Twilio incompletas")
-twilio_client = Client(TWILIO_SID, TWILIO_AUTH)
-
-# Flask app
+# --- FLASK APP ---
 app = Flask(__name__)
 
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.get_json()
-    user_msg = data.get("message")
-    phone = data.get("phone")
-    if not user_msg or not phone:
-        return jsonify({"error":"Faltan campos"}), 400
+@app.route("/")
+def home():
+    return "Servidor activo ✅"
 
-    # Lógica de GPT
-    response = client_ai.chat.completions.create(
-        model="gpt-4",
-        messages=[{"role":"user","content":user_msg}]
-    )
-    reply = response.choices[0].message.content
+@app.route("/leer", methods=["GET"])
+def leer_datos():
+    try:
+        data = sheet.get_all_records()
+        return jsonify({"status": "success", "data": data})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-    # Enviar por Twilio
-    twilio_client.messages.create(
-        body=reply,
-        from_=TWILIO_PHONE,
-        to=phone
-    )
-    return jsonify({"reply": reply})
+@app.route("/agregar", methods=["POST"])
+def agregar_datos():
+    try:
+        new_data = request.json
+        if not new_data:
+            return jsonify({"status": "error", "message": "No se recibió JSON"}), 400
+        values = [new_data[col] for col in new_data]
+        sheet.append_row(values)
+        return jsonify({"status": "success", "message": "Fila agregada"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
